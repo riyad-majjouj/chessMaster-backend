@@ -1,34 +1,55 @@
-// app.js
+// استيراد المكتبات الأساسية
 const express = require('express');
 const dotenv = require('dotenv');
-const connectDB = require('./config/db');
-const authRoutes = require('./routes/authRoutes');
-const cors = require('cors'); // 1. استيراد cors
-// تحميل متغيرات البيئة
+const cors = require('cors');
+
+// تحميل متغيرات البيئة من ملف .env
 dotenv.config();
 
-// الاتصال بقاعدة البيانات
-connectDB();
+// --- استيراد المتحكمات والمسارات ---
+const { handleStripeWebhook } = require('./controllers/paymentController'); // <-- استيراد معالج الويب هوك مباشرة
+const authRoutes = require('./routes/authRoutes');
+const courseRoutes = require('./routes/courseRoutes');
+const enrollmentRoutes = require('./routes/enrollmentRoutes'); 
+const progressRoutes = require('./routes/progressRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const paymentRoutes = require('./routes/paymentRoutes'); // <-- الآن سيستورد الراوتر بشكل صحيح
 
+// إنشاء تطبيق Express
 const app = express();
+
+// استخدام Middleware (وظائف وسيطة)
 app.use(cors());
-// وسيط لتحليل جسم الطلبات كـ JSON
+
+// --- معالجة الويب هوك أولاً ---
+// هذا المسار يجب أن يكون قبل express.json() لأنه يحتاج للنص الخام
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
+
+// الآن يمكننا استخدام express.json() لبقية المسارات
 app.use(express.json());
 
-// تحديد المسارات الرئيسية
-app.get('/', (req, res) => {
-  res.send('Auth API is running...');
-});
-
-// استخدام مسارات المصادقة
+// --- استخدام المسارات (Routing) ---
 app.use('/api/auth', authRoutes);
+app.use('/api/courses', courseRoutes);
+app.use('/api/enroll', enrollmentRoutes);
+app.use('/api/progress', progressRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/uploads', uploadRoutes);
 
-// وسيط لمعالجة الأخطاء (مثال بسيط)
-// يمكنك إضافة وسيط أكثر تفصيلاً هنا
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send('Something broke!');
+// --- هذا هو السطر الذي تم إصلاحه ---
+// الآن المتغير paymentRoutes يحتوي على الراوتر مباشرة
+app.use('/api/payments', paymentRoutes); 
+
+// مسار تجريبي للتأكد من أن الخادم يعمل
+app.get('/', (req, res) => {
+  res.send('مرحباً بك في الواجهة الخلفية لموقع دورات الشطرنج!');
 });
 
+// تحديد المنفذ (Port) الذي سيعمل عليه الخادم
+const PORT = process.env.PORT || 5000;
 
-module.exports = app; // تصدير التطبيق للاستخدام في server.js
+// تشغيل الخادم
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});

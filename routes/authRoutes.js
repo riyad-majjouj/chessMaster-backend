@@ -1,13 +1,12 @@
-// routes/authRoutes.js
-
 const express = require('express');
-const { registerUser, loginUser /*, getMe*/ } = require('../controllers/authController');
-// const { protect } = require('../middlewares/authMiddleware'); // إذا أردت استخدام getMe
+const { registerUser, loginUser } = require('../controllers/authController');
 
 const router = express.Router();
 
+// مسار لإنشاء حساب مستخدم جديد
 router.post('/register', registerUser);
+
+// مسار لتسجيل دخول المستخدم
 router.post('/login', loginUser);
-// router.get('/me', protect, getMe); // مثال لمسار محمي
 
 module.exports = router;

@@ -1,106 +1,96 @@
-// controllers/authController.js
-const User = require('../models/User');
-const generateToken = require('../utils/generateToken');
+const supabase = require('../config/supabase');
 
-// @desc    تسجيل مستخدم جديد
-// @route   POST /api/auth/register
-// @access  Public
-exports.registerUser = async (req, res) => {
-  const { username, email, password, isSubscribed } = req.body;
-
+// وظيفة لإنشاء حساب جديد
+const registerUser = async (req, res) => {
   try {
-    // التحقق إذا كان المستخدم موجودًا بالفعل
-    let user = await User.findOne({ $or: [{ email }, { username }] });
-    if (user) {
-      return res.status(400).json({ message: 'المستخدم موجود بالفعل (البريد الإلكتروني أو اسم المستخدم)' });
+    const { email, password, full_name } = req.body;
+
+    if (!email || !password || !full_name) {
+      return res.status(400).json({ message: 'Please provide email, password, and full name.' });
     }
 
-    // إنشاء مستخدم جديد
-    user = new User({
-      username,
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      isSubscribed: isSubscribed === true || isSubscribed === 'true' ? true : false, // تحويل القيمة إلى boolean
     });
 
-    await user.save();
-
-    // إنشاء توكن وإرساله
-    const token = generateToken(user._id);
-
-    res.status(201).json({
-      _id: user._id,
-      username: user.username,
-      email: user.email,
-      isSubscribed: user.isSubscribed,
-      token,
-      message: 'تم تسجيل المستخدم بنجاح'
-    });
-
-  } catch (error) {
-    console.error(error.message);
-    if (error.name === 'ValidationError') {
-        const messages = Object.values(error.errors).map(val => val.message);
-        return res.status(400).json({ message: messages.join(', ') });
+    if (authError) {
+      return res.status(400).json({ message: authError.message });
     }
-    res.status(500).json({ message: 'خطأ في السيرفر' });
-  }
-};
-
-// @desc    تسجيل دخول المستخدم
-// @route   POST /api/auth/login
-// @access  Public
-exports.loginUser = async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    // التحقق من وجود البريد الإلكتروني وكلمة المرور
-    if (!email || !password) {
-      return res.status(400).json({ message: 'الرجاء إدخال البريد الإلكتروني وكلمة المرور' });
-    }
-
-    // البحث عن المستخدم بالبريد الإلكتروني وإرجاع كلمة المرور
-    const user = await User.findOne({ email }).select('+password');
-
+    
+    const user = authData.user;
     if (!user) {
-      return res.status(401).json({ message: 'بيانات الاعتماد غير صحيحة (بريد إلكتروني)' });
+        return res.status(400).json({ message: "Registration successful, but user data not returned. Please verify your email." });
     }
 
-    // مقارنة كلمة المرور
-    const isMatch = await user.comparePassword(password);
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .insert([{ id: user.id, full_name: full_name, role: 'user' }]);
 
-    if (!isMatch) {
-      return res.status(401).json({ message: 'بيانات الاعتماد غير صحيحة (كلمة مرور)' });
+    if (profileError) {
+        return res.status(500).json({ message: profileError.message });
     }
 
-    // إنشاء توكن وإرساله
-    const token = generateToken(user._id);
-
-    res.status(200).json({
-      _id: user._id,
-      username: user.username,
-      email: user.email,
-      isSubscribed: user.isSubscribed,
-      token,
-      message: 'تم تسجيل الدخول بنجاح'
-    });
+    res.status(201).json({ message: 'User registered successfully. Please check your email to verify your account.' });
 
   } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ message: 'خطأ في السيرفر' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
+// وظيفة لتسجيل الدخول
+const loginUser = async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-// مثال لدالة محمية (يمكنك إضافتها لاحقًا)
-// @desc    الحصول على بيانات المستخدم الحالي
-// @route   GET /api/auth/me
-// @access  Private (تحتاج إلى توكن)
-// exports.getMe = async (req, res) => {
-//   // req.user يتم تعيينه بواسطة authMiddleware
-//   const user = await User.findById(req.user.id).select('-password');
-//   if (!user) {
-//       return res.status(404).json({ message: 'المستخدم غير موجود' });
-//   }
-//   res.status(200).json(user);
-// };
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Please provide email and password.' });
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      return res.status(401).json({ message: error.message });
+    }
+
+    // --- الجزء المعدل يبدأ هنا ---
+    // بعد تسجيل الدخول بنجاح، جلب الملف الشخصي للمستخدم
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role, full_name')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profileError) {
+      // حتى لو فشل جلب الملف الشخصي، لا يزال تسجيل الدخول ناجحاً
+      // سنرسل بيانات المستخدم الأساسية فقط في هذه الحالة
+      console.error("Could not fetch user profile on login:", profileError.message);
+      return res.status(200).json({ 
+        message: 'Logged in successfully (profile fetch failed)', 
+        session: data.session, 
+        user: data.user
+      });
+    }
+    
+    // دمج معلومات الملف الشخصي مع بيانات المستخدم
+    const userWithProfile = { ...data.user, ...profile };
+    
+    res.status(200).json({ 
+      message: 'Logged in successfully', 
+      session: data.session, 
+      user: userWithProfile // <-- إرسال المستخدم مع دوره واسمه الكامل
+    });
+    // --- الجزء المعدل ينتهي هنا ---
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+module.exports = {
+  registerUser,
+  loginUser,
+};
